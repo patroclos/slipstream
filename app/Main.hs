@@ -2,11 +2,13 @@ module Main where
 
 import Metainfo
 import Bep
+import Peer
 
 import Text.Parsec
 import Data.Either.Combinators (rightToMaybe)
 import Data.List (nub)
 import System.Environment (getArgs)
+import Control.Monad (void)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Crypto.Hash.SHA1 as SHA1
@@ -26,13 +28,14 @@ handleInfo :: Either ParseError [(String, BEnc)] -> IO ()
 handleInfo (Left e) = error $ show e
 handleInfo (Right dict) = do
   let announcers' = announcers dict
-  sequence_ (putStrLn.(++) "\tAnnouncer: ".show<$> announcers')
   case info dict of
     Nothing -> return ()
     (Just (BDict idict)) -> do
       putStrLn $ "Meta Keys: " ++ show (fst <$> dict)
+      putStrLn $ "File(s) size: " ++ show (totalSize idict)
       putStrLn $ "Info Keys: " ++ show (fst <$> idict)
       putStrLn $ "Info Hash: " ++ show (infoHash idict)
+      sequence_ (putStrLn.(++) "\tAnnouncer: ".show<$> announcers')
       ips <- unique <$> bepAnnounce (announcers dict) (infoHash idict)
       sequence_ $ print <$> ips
       putStrLn $ "number of addresses: " ++ show (length ips)
