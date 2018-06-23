@@ -39,6 +39,7 @@ handleInfo (Right dict) = do
       ips <- unique <$> bepAnnounce (announcers dict) (infoHash idict)
       sequence_ $ print <$> ips
       putStrLn $ "number of addresses: " ++ show (length ips)
+      void $ testItWith (show $ infoHash idict) ips
 
 infoHash :: [(String, BEnc)] -> B.ByteString
 infoHash dict = SHA1.finalize . SHA1.update SHA1.init $ bencode $ BDict dict

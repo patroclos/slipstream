@@ -32,6 +32,8 @@ dependencies:
 - network
 - binary
 - parallel-io
+- mtl
+- transformers
 
 library:
   source-dirs: src
