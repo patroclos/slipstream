@@ -5,6 +5,7 @@ import Bep
 import Peer
 
 import Text.Parsec
+import Text.Printf
 import Data.Either.Combinators (rightToMaybe)
 import Data.List (nub)
 import System.Environment (getArgs)
@@ -32,7 +33,7 @@ handleInfo (Right dict) = do
     Nothing -> return ()
     (Just (BDict idict)) -> do
       putStrLn $ "Meta Keys: " ++ show (fst <$> dict)
-      putStrLn $ "File(s) size: " ++ show (totalSize idict)
+      putStrLn $ "File(s) size: " ++ humanReadableBytes (totalSize idict)
       putStrLn $ "Info Keys: " ++ show (fst <$> idict)
       putStrLn $ "Info Hash: " ++ show (infoHash idict)
       sequence_ (putStrLn.(++) "\tAnnouncer: ".show<$> announcers')
@@ -45,3 +46,13 @@ infoHash :: [(String, BEnc)] -> B.ByteString
 infoHash dict = SHA1.finalize . SHA1.update SHA1.init $ bencode $ BDict dict
 
 parseAnnouncer uri = (rightToMaybe $ URI.parseURI URI.strictURIParserOptions uri) >>= \uri -> Just $ (URI.uriScheme uri, URI.authorityHost <$> URI.uriAuthority uri)
+
+humanReadableBytes :: Int -> String
+humanReadableBytes size
+  | abs size < 1024 = printf "%dB" size
+  | otherwise       = printf "%.1f%sB" n unit
+  where
+    (n, unit) = last $ takeWhile ((>=0.5).abs.fst) pairs
+    pairs = zip (iterate (/1024) size') units
+    size' = fromIntegral size :: Double
+    units = ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]
