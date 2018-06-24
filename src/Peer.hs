@@ -73,4 +73,4 @@ module Peer where
   testItWith infoHash peers = void $ parallel $
     runSession <$> peers
       where
-        runSession (ip, port) = connectToPeer ip port >>= (doHandshake infoHash)
+        runSession (ip, port) = connectToPeer ip port >>= doHandshake infoHash
