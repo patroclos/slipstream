@@ -38,8 +38,8 @@ handleInfo (Left e) = error $ show e
 handleInfo (Right meta) = do
   let announcers' = announcers meta
   void $ runMaybeT $ do
-    BString torrentName <- dictLookupM "name" meta
     BDict info <- dictLookupM "info" meta
+    BString torrentName <- dictLookupM "name" info
     BInt pieceLength <- dictLookupM "piece length" info
     BString piecesStr <- dictLookupM "pieces" info
     let pieceHashes = BS.pack <$> chunksOf 20 piecesStr :: [B.ByteString]
