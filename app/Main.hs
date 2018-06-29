@@ -3,54 +3,81 @@ module Main where
 import Metainfo
 import Bep
 import Peer
+import Common (MaybeIO)
 
-import Text.Parsec
-import Text.Printf
+import Text.Parsec (ParseError)
+import Text.Printf (printf)
+import Data.Maybe (catMaybes)
 import Data.Either.Combinators (rightToMaybe)
 import Data.List (nub)
+import Data.List.Split (chunksOf)
 import System.Environment (getArgs)
-import Control.Monad (void)
+import Control.Monad (void, mapM, replicateM)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Maybe (runMaybeT)
+import Control.Applicative (empty)
+
+import Data.IORef (IORef, newIORef, atomicModifyIORef, readIORef, writeIORef)
+import Control.Concurrent.Chan (newChan, readChan, Chan)
+
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Crypto.Hash.SHA1 as SHA1
 import qualified URI.ByteString as URI
 
-main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    [file] -> parseMetainfoFromFile file >>= handleInfo
-    _ -> error "usage: slipstream [torrent file]"
+import Control.Concurrent.ParallelIO.Global (parallel)
 
-unique :: Eq a => [a] -> [a]
-unique = reverse . nub . reverse
+main :: IO ()
+-- main = spawnWorkers
+main = do
+  [file] <- getArgs
+  parseMetainfoFromFile file >>= handleInfo
 
 handleInfo :: Either ParseError [(String, BEnc)] -> IO ()
 handleInfo (Left e) = error $ show e
-handleInfo (Right dict) = do
-  let announcers' = announcers dict
-  case info dict of
-    Nothing -> return ()
-    (Just (BDict idict)) -> do
-      putStrLn $ "Meta Keys: " ++ show (fst <$> dict)
-      putStrLn $ "File(s) size: " ++ humanReadableBytes (totalSize idict)
-      putStrLn $ "Info Keys: " ++ show (fst <$> idict)
-      putStrLn $ "Info Hash: " ++ show (infoHash idict)
-      sequence_ (putStrLn.(++) "\tAnnouncer: ".show<$> announcers')
-      ips <- unique <$> bepAnnounce (announcers dict) (infoHash idict)
-      sequence_ $ print <$> ips
-      putStrLn $ "number of addresses: " ++ show (length ips)
-      void $ testItWith (BS.unpack $ infoHash idict) ips
+handleInfo (Right meta) = do
+  let announcers' = announcers meta
+  void $ runMaybeT $ do
+    BString torrentName <- dictLookupM "name" meta
+    BDict info <- dictLookupM "info" meta
+    BInt pieceLength <- dictLookupM "piece length" info
+    BString piecesStr <- dictLookupM "pieces" info
+    let pieceHashes = BS.pack <$> chunksOf 20 piecesStr :: [B.ByteString]
+    pieceQueue <- liftIO.newIORef $ zip [0..] pieceHashes
+    pieceChan <- liftIO newChan
+
+    peerEndpoints <- liftIO $ take 1000.nub <$> bepAnnounce announcers' (infoHash info)
+    peers <- liftIO $ catMaybes <$> (parallel $ (\(h,p) -> runMaybeT $ createPeer h p (BS.unpack $ infoHash info) (totalSize info) pieceLength pieceQueue pieceChan) <$> peerEndpoints)
+    liftIO $ putStrLn $ "Number of peers: " ++ (show $ length peers)
+    liftIO $ parallel $ runPeer <$> peers
+
+    resultBuffer <- liftIO $ newIORef []
+    nextPieceIdx <- liftIO $ newIORef 0
+
+    liftIO $ replicateM (length pieceHashes) $ do
+      ((idx, hash), chunk) <- readChan pieceChan
+      atomicModifyIORef resultBuffer $ \buf -> ((idx, chunk):buf, Nothing)
+      putStrLn $ "Enqueued result for " ++ (show idx)
+      buf <- readIORef resultBuffer
+      commit torrentName buf nextPieceIdx
+      where
+        commit filename buf nextPieceIdx = do
+          nextIdx <- readIORef nextPieceIdx
+          case dictLookup nextIdx buf of
+            Just next -> do
+              B.appendFile filename next
+              putStrLn $ "Committing piece " ++ (show nextIdx)
+              writeIORef nextPieceIdx (nextIdx + 1)
+              commit filename buf nextPieceIdx
+            Nothing -> return ()
 
 infoHash :: [(String, BEnc)] -> B.ByteString
 infoHash dict = SHA1.finalize . SHA1.update SHA1.init $ bencode $ BDict dict
 
-parseAnnouncer uri = (rightToMaybe $ URI.parseURI URI.strictURIParserOptions uri) >>= \uri -> Just $ (URI.uriScheme uri, URI.authorityHost <$> URI.uriAuthority uri)
-
 humanReadableBytes :: Int -> String
 humanReadableBytes size
   | abs size < 1024 = printf "%dB" size
-  | otherwise       = printf "%.1f%sB" n unit
+  | otherwise       = printf "%.4f%sB" n unit
   where
     (n, unit) = last $ takeWhile ((>=0.5).abs.fst) pairs
     pairs = zip (iterate (/1024) size') units

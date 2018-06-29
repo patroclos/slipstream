@@ -34,6 +34,7 @@ dependencies:
 - parallel-io
 - mtl
 - transformers
+- random
 
 library:
   source-dirs: src
