@@ -167,7 +167,7 @@ getMessage = getWord8 >>= readPayloadOf
     readPayloadOf 8 = liftM3 Cancel getWord32be getWord32be getWord32be
 
 
-handshakePrefix = '\19':"BitTorrent protocol"
+handshakePrefix = "\19BitTorrent protocol"
 handshakePadding = replicate 8 '\0'
 handshake infoHash peerId = handshakePrefix ++ handshakePadding ++ infoHash ++ peerId
 

@@ -1,4 +1,5 @@
 .stack-work/
 slipstream.cabal
 test/torrents
+dist
 *~

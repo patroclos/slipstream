@@ -46,7 +46,7 @@ handleInfo (Right meta) = do
     pieceQueue <- liftIO.newIORef $ zip [0..] pieceHashes
     pieceChan <- liftIO newChan
 
-    peerEndpoints <- liftIO $ take 1000.nub <$> bepAnnounce announcers' (infoHash info)
+    peerEndpoints <- liftIO $ bepAnnounce announcers' (infoHash info)
     peers <- liftIO $ catMaybes <$> (parallel $ (\(h,p) -> runMaybeT $ createPeer h p (BS.unpack $ infoHash info) (totalSize info) pieceLength pieceQueue pieceChan) <$> peerEndpoints)
     liftIO $ putStrLn $ "Number of peers: " ++ (show $ length peers)
     liftIO $ parallel $ runPeer <$> peers
@@ -74,8 +74,8 @@ handleInfo (Right meta) = do
 infoHash :: [(String, BEnc)] -> B.ByteString
 infoHash dict = SHA1.finalize . SHA1.update SHA1.init $ bencode $ BDict dict
 
-humanReadableBytes :: Int -> String
-humanReadableBytes size
+showByteSize :: Int -> String
+showByteSize size
   | abs size < 1024 = printf "%dB" size
   | otherwise       = printf "%.4f%sB" n unit
   where
