@@ -35,7 +35,6 @@ type Length = Word32
 type SHA1Hash = B.ByteString
 
 type PieceQueue = IORef [(PieceIdx, SHA1Hash)]
-type PieceChan = Chan ((PieceIdx, SHA1Hash), B.ByteString)
 
 data PeerMsg
   = KeepAlive
@@ -56,12 +55,11 @@ data Peer = Peer
   , peerTorrentLength :: Int
   , peerPieceLength   :: Int
   , peerPieceQueue    :: PieceQueue
-  , peerPieceChan     :: PieceChan
   , peerProvides      :: IORef [PieceIdx]
   }
 
-createPeer :: String -> Word16 -> String -> Int -> Int -> PieceQueue -> PieceChan -> MaybeIO Peer
-createPeer host port infoHash torrentLength pieceLength queue chan = do
+createPeer :: String -> Word16 -> String -> Int -> Int -> PieceQueue -> MaybeIO Peer
+createPeer host port infoHash torrentLength pieceLength queue = do
   addr <- liftIO $ head <$> getAddrInfo Nothing (Just host) (Just $ show port)
   sock <- connectPeer addr >>= doHandshake infoHash
   msg <- liftIODiscardExceptions Nothing $ timeout 1000000 $ readPeerMessage sock
@@ -76,7 +74,6 @@ createPeer host port infoHash torrentLength pieceLength queue chan = do
         , peerTorrentLength = torrentLength
         , peerPieceLength = pieceLength
         , peerPieceQueue = queue
-        , peerPieceChan = chan
         , peerProvides = providedPieces }
     _ -> empty
 

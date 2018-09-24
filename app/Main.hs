@@ -62,12 +62,11 @@ handleInfo (Right meta) = void.runMaybeT $ do
 
   liftIO $ touchFiles files downloadFolder
   pieceQueue <- liftIO.newIORef $ zip [0..] pieceHashes
-  pieceChan <- liftIO newChan
 
   liftIO $ runStream $
     asyncly $
-    (foldr (<>) mempty $ (`bepAnnouncely` (infoHash info)) <$> (announcers meta))
-    |& S.mapMaybeM (\(h,p)->runMaybeT $ createPeer h p (BS.unpack $ infoHash info) (totalSize info) pieceLength pieceQueue pieceChan)
+    (foldr (<>) mempty $ (`bepAnnounce` (infoHash info)) <$> (announcers meta))
+    |& S.mapMaybeM (\(h,p)->runMaybeT $ createPeer h p (BS.unpack $ infoHash info) (totalSize info) pieceLength pieceQueue)
     >>= (\peer@Peer{peerSocket=sock} -> asyncly $ do
       liftIO $ sendUnchokeInterested sock
       x@((pieceIndex, hash), buffer) <- peerStreamHandler peer
