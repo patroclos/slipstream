@@ -87,6 +87,7 @@ peerStreamHandler
   , peerPieceQueue = queue
   } = loop
   where
+    log msg = putStrLn $ "[peer] (" ++ (show $ addrAddress $ peerAddr peer) ++ ") " ++ msg
     loop = do
       provided <- liftIO $ readIORef providesRef
       work <- liftIO $ atomicModifyIORef queue $ \remainingPieces ->
@@ -97,20 +98,22 @@ peerStreamHandler
               [] -> (r, Nothing)
               x:xs -> (filter (/=x) r, Just x)
       case work of
-        Nothing -> (liftIO $ do threadDelay 500000; putStrLn "Shutting down for lack of work") >> mempty
+        Nothing -> (liftIO $ threadDelay 500000) >> loop
         Just work@(idx, hash) -> do
           let realLength = realPieceSize (peerTorrentLength peer) pieceLength (fromIntegral idx)
-          liftIO $ putStrLn $ "Beginning download of " ++ show idx
+          liftIO $ log $ "Beginning download of " ++ show idx
           result <- liftIO $ (`catch` (errorFallback Nothing)) $ timeout (20 * 1000000) $ pullChunkedPiece sock readPiece idx realLength (2^14)
           case result of
             Nothing -> (liftIO $ enqueue work (error "Timeout")) >> S.nil
             Just piece -> do
               let rcvHash = SHA1.finalize . SHA1.update SHA1.init $ piece
               if rcvHash /= hash then do
-                liftIO $ putStrLn $ "Error validating hash " ++ (show rcvHash) ++ " with defined " ++ (show hash)
+                liftIO $ log $ "Error validating hash " ++ (show rcvHash) ++ " with defined " ++ (show hash)
                 liftIO $ enqueue work (error "Hash Mismatch")
                 loop
-              else S.cons (work, piece) loop
+              else do
+                liftIO $ log $ "Downloaded piece " ++ (show idx)
+                S.cons (work, piece) loop
 
     errorFallback :: Monad m => a -> SomeException -> m a
     errorFallback a _ = return a

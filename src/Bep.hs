@@ -56,10 +56,9 @@ noPort = 0
 queryTracker :: AddrInfo -> B.ByteString -> IO [(String, Word16)]
 queryTracker tracker infoHash = do
   bindaddr <- head <$> getAddrInfo Nothing (Just "0.0.0.0") Nothing
-  let log msg = putStrLn $ "[*] (" ++ show (addrAddress tracker) ++ ") " ++ msg
+  let log msg = putStrLn $ "[tracker] (" ++ show (addrAddress tracker) ++ ") " ++ msg
   sock <- socket (addrFamily bindaddr) Datagram defaultProtocol
   bind sock (addrAddress bindaddr)
-  log "Sending connect_request"
   void $ sendTo sock (B.pack $ connectRequestData 0x414141) (addrAddress tracker)
   concat.maybeToList <$> timeout queryTimeout (recv sock 4096 >>= \ack -> do
     let (_, transactionId, connectionId) = runGet getConnectResponse (fromStrict ack)
@@ -68,7 +67,7 @@ queryTracker tracker infoHash = do
     sendTo sock query (addrAddress tracker)
     recv sock 4096 >>= \answer -> do
       let (action, transactionId, interval, leechers, seeders, endpoints) = runGet getAnnounceResponse (fromStrict answer)
-      log $ "Received announce with " ++ (show seeders) ++ " peers"
+      log $ "Received announce with " ++ (show seeders) ++ " seeders"
       close sock
       sequence $ (\(ip,port)-> do
         ipString <- inet_ntoa $ byteSwap32 ip
