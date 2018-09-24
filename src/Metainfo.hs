@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Metainfo where
 
+import Files
+
 import Text.Parsec
 import qualified Network.URI.Encode as URI
 import Control.Monad (liftM, liftM2, Monad)
@@ -54,29 +56,28 @@ numPieces dict = (\(BString s) -> ((`div` 20).length) s) <$> dictLookup "pieces"
 
 -- getFileInfo [("name", BString "myDir"), ("files", BList [BDict [("path": BList [BString "a", BString "b"]), ("length", BInt 5)]])]
 -- getFileInfo [("name", BString "myFile.txt"), ("length", BInt 5)]
-getFileInfo :: [(String, BEnc)] -> Either (String, Int) [([String], Int)]
+getFileInfo :: [(String, BEnc)] -> [TorrentFile]
 getFileInfo dict = do
   let len = dictLookup "length" dict
   let name = dictLookup "name" dict
   let files = dictLookup "files" dict
   case (name, files, len) of
-    -- {"name": "singleFile.txt", "length": 1}
-    (Just (BString n), _, Just (BInt l)) -> Left (n,l)
-    -- {"files": [{"length": 1, "path": ["subdir", "filename.txt"]}]}
-    (_, Just (BList files), _) -> Right $ fileInfo <$> files
+    (Just (BString n), _, Just (BInt l)) ->
+      [TorrentFile {torrentFilePath = [n], torrentFileSize=l}]
+    (_, Just (BList files), _) -> fileInfo <$> files
       where
         fileInfo (BDict f) =
           case (dictLookup "path" f, dictLookup "length" f) of
-            (Just (BList segments), Just (BInt len)) -> ([s | x@(BString s) <- segments], len)
+            (Just (BList segments), Just (BInt len)) ->
+              TorrentFile
+              {torrentFilePath = [s | x@(BString s) <- segments], torrentFileSize = len}
             (_, _) -> error "File entries must have path and length properties"
     (_, _, _) -> error "There has to be either a name and length or a files property in the info dictionary"
 
 totalSize :: [(String, BEnc)] -> Int
-totalSize = unpack . bimap left right . getFileInfo
-  where
-    left = snd
-    right = sum.(snd<$>)
-    unpack = either id id
+totalSize meta =
+  case getFileInfo meta of
+    files -> sum (torrentFileSize <$> files)
 
 pieceChunks :: Int -> Int -> [(Int, Int)]
 pieceChunks pieceLength step = [0, step, pieceLength-step] `zip` repeat step

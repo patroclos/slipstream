@@ -35,6 +35,10 @@ dependencies:
 - mtl
 - transformers
 - random
+- streamly >= 0.5.1
+- stm
+- directory
+- filepath
 
 library:
   source-dirs: src

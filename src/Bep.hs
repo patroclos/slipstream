@@ -2,6 +2,7 @@
 module Bep where
 
 import Peer (slipstreamPeerId)
+import Common (liftIODiscardExceptions)
 
 import System.Timeout
 import Control.Concurrent (forkIO, threadDelay)
@@ -23,13 +24,18 @@ import Network.Socket.ByteString (recv, sendAll, send, sendTo)
 import qualified URI.ByteString as URI
 import Control.Concurrent.ParallelIO.Global (parallel)
 
-bepAnnounce :: [String] -> B.ByteString -> IO [(String, Word16)]
-bepAnnounce trackers infoHash = do
-  trackerAddresses <- catMaybes <$> sequence (trackerAddr <$> trackers)
-  fmap concat (parallel $ (`queryTracker` infoHash) <$> trackerAddresses)
+import Control.Monad.IO.Class (liftIO)
+import Streamly hiding ((<>))
+import qualified Streamly.Prelude as SP
+
+bepAnnounce tracker infoHash = do
+  addr <- liftIO $ trackerAddr tracker
+  case addr of
+    Just addr -> liftIO (queryTracker addr infoHash) >>= SP.fromList
+    Nothing -> mempty
 
 trackerAddr :: String -> IO (Maybe AddrInfo)
-trackerAddr uri =
+trackerAddr uri = liftIODiscardExceptions Nothing $
   case URI.parseURI URI.strictURIParserOptions $ BS.pack uri of
     Left err -> return Nothing
     Right uri -> do

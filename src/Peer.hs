@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Peer where
 
 import Data.Binary
@@ -10,8 +12,8 @@ import Control.Monad.Writer
 import Control.Monad
 import Data.Bits (testBit)
 import Data.IORef (IORef, atomicModifyIORef, newIORef, readIORef)
-import Control.Exception
 import System.Timeout
+import Control.Exception
 import Control.Concurrent (Chan, writeChan, forkIO, ThreadId, threadDelay)
 import Control.Concurrent.ParallelIO.Global (parallel)
 import Text.Printf (printf)
@@ -22,7 +24,10 @@ import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Applicative (empty)
 import qualified Crypto.Hash.SHA1 as SHA1
 
-import Common (MaybeIO)
+import Streamly hiding ((<>))
+import qualified Streamly.Prelude as S
+
+import Common (MaybeIO, liftIODiscardExceptions)
 
 type PieceIdx = Word32
 type Begin = Word32
@@ -63,7 +68,7 @@ createPeer host port infoHash torrentLength pieceLength queue chan = do
   case msg of
     Nothing -> empty
     Just (Bitfield bf) -> do
-      liftIO $ print $ filter (`notElem` (piecesInBitfield $ B.unpack bf)) [0..610] -- print missing piece indices
+      --liftIO $ print $ filter (`notElem` (piecesInBitfield $ B.unpack bf)) [0..610] -- print missing piece indices
       providedPieces <- liftIO $ newIORef $ piecesInBitfield $ B.unpack bf
       return Peer
         { peerAddr = addr
@@ -75,47 +80,43 @@ createPeer host port infoHash torrentLength pieceLength queue chan = do
         , peerProvides = providedPieces }
     _ -> empty
 
-liftIODiscardExceptions a io = liftIO $ (`catch` errToEmpty a) io
-errToEmpty :: a -> SomeException -> IO a
-errToEmpty a e = return a
 
-runPeer :: Peer -> IO ThreadId
-runPeer peer = do
-  sendUnchokeInterested $ peerSocket peer
-  forkIO loop
-  where 
+--peerStreamHandler :: Peer -> S.SerialT IO ((PieceIdx, SHA1Hash), B.ByteString)
+peerStreamHandler
+  peer@Peer
+  { peerSocket = sock
+  , peerPieceLength = pieceLength
+  , peerProvides = providesRef
+  , peerPieceQueue = queue
+  } = loop
+  where
     loop = do
-      let sock = peerSocket peer
-      let queue = peerPieceQueue peer
-      let pieceLength = peerPieceLength peer
-      providedPieces <- readIORef $ peerProvides peer
-      work <- atomicModifyIORef queue $ \remainingPieces ->
+      provided <- liftIO $ readIORef providesRef
+      work <- liftIO $ atomicModifyIORef queue $ \remainingPieces ->
         case remainingPieces of
           [] -> ([], Nothing)
           r ->
-            case filter ((`elem` providedPieces).fst) r of
+            case filter ((`elem` provided).fst) r of
               [] -> (r, Nothing)
               x:xs -> (filter (/=x) r, Just x)
       case work of
-        Nothing -> do
-          -- TODO: distinguish between completion and missing pieces
-          -- TODO: wait for Have message instead of spinning
-          threadDelay 250000
-          loop
-        Just (idx, hash) -> (`catch` enqueue (idx, hash)) $ do
-          putStrLn $ "Beginning download of " ++ show idx
+        Nothing -> (liftIO $ do threadDelay 500000; putStrLn "Shutting down for lack of work") >> mempty
+        Just work@(idx, hash) -> do
           let realLength = realPieceSize (peerTorrentLength peer) pieceLength (fromIntegral idx)
-          result <- timeout (20 * 1000000) $ pullChunkedPiece sock readPiece idx realLength (2^14)
+          liftIO $ putStrLn $ "Beginning download of " ++ show idx
+          result <- liftIO $ (`catch` (errorFallback Nothing)) $ timeout (20 * 1000000) $ pullChunkedPiece sock readPiece idx realLength (2^14)
           case result of
+            Nothing -> (liftIO $ enqueue work (error "Timeout")) >> S.nil
             Just piece -> do
               let rcvHash = SHA1.finalize . SHA1.update SHA1.init $ piece
               if rcvHash /= hash then do
-                putStrLn $ "Error validating hash " ++ (show rcvHash) ++ " with defined " ++ (show hash)
-                enqueue (idx, hash) (error "Hash Mismatch")
-              else
-                writeChan (peerPieceChan peer) ((idx, hash), piece)
-              loop
-            Nothing -> enqueue (idx, hash) (error "Timeout")
+                liftIO $ putStrLn $ "Error validating hash " ++ (show rcvHash) ++ " with defined " ++ (show hash)
+                liftIO $ enqueue work (error "Hash Mismatch")
+                loop
+              else S.cons (work, piece) loop
+
+    errorFallback :: Monad m => a -> SomeException -> m a
+    errorFallback a _ = return a
 
     enqueue :: (PieceIdx, B.ByteString) -> SomeException -> IO ()
     enqueue item err = atomicModifyIORef (peerPieceQueue peer) $ \remaining -> (item:remaining, ())
@@ -128,7 +129,6 @@ runPeer peer = do
           atomicModifyIORef (peerProvides peer) $ \lst -> (idx:lst, Nothing)
           readPiece
         _ -> readPiece
-
 
 connectPeer :: AddrInfo -> MaybeIO Socket
 connectPeer addrInfo = do
