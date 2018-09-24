@@ -55,4 +55,3 @@ writeFileSegment downloadFolder (FileSegment TorrentFile{torrentFilePath=path} o
   h <- openBinaryFile (foldl (</>) downloadFolder path) ReadWriteMode
   hSeek h AbsoluteSeek $ fromIntegral offset
   B.hPutStr h buffer
-  putStrLn "wrote file segment to disk"
